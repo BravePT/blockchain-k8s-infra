@@ -1,0 +1,76 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: blockchain
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: solana-rpc-allow-traffic
+  namespace: blockchain
+spec:
+  podSelector:
+    matchLabels:
+      app: solana-rpc
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow traffic from Ingress Controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8899 # RPC
+        - protocol: TCP
+          port: 8900 # WS
+
+    # Allow traffic from Prometheus (monitoring)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 8899 # Metrics
+
+    # Allow P2P Gossip/TPU from anywhere (Internet)
+    - from: []
+      ports:
+        - protocol: UDP
+          port: 8000
+          endPort: 8020
+        - protocol: UDP
+          port: 8001 # Gossip
+        - protocol: UDP
+          port: 8002
+        - protocol: UDP
+          port: 8003 # TPU
+        - protocol: UDP
+          port: 8004
+        - protocol: UDP
+          port: 8005
+        - protocol: UDP
+          port: 8006
+        - protocol: UDP
+          port: 8007
+        - protocol: UDP
+          port: 8008
+
+  egress:
+    # Allow all egress for blockchain syncing (needs to talk to many peers)
+    - {}

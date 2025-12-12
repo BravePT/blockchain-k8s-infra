@@ -34,7 +34,11 @@ alertmanager:
 grafana:
   enabled: true
   adminUser: admin
-  adminPassword: changeme  # Change this or use existing secret
+  # adminPassword: changeme  # REMOVED: Insecure default
+  admin:
+    existingSecret: grafana-admin-credentials
+    userKey: admin-user
+    passwordKey: admin-password
   
   persistence:
     enabled: true

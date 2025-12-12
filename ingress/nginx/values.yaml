@@ -55,4 +55,4 @@ controller:
       cpu: 1000m
       memory: 512Mi
 
-  allowSnippetAnnotations: true
+  allowSnippetAnnotations: false
