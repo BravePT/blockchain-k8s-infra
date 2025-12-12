@@ -1,0 +1,227 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: solana-rpc
+  namespace: blockchain
+  labels:
+    app: solana-rpc
+    chain: solana
+    network: mainnet
+spec:
+  serviceName: solana-rpc
+  replicas: 1
+  selector:
+    matchLabels:
+      app: solana-rpc
+  template:
+    metadata:
+      labels:
+        app: solana-rpc
+        chain: solana
+        network: mainnet
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8899"
+        prometheus.io/path: "/metrics"
+    spec:
+      terminationGracePeriodSeconds: 300
+      
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsGroup: 1000
+      
+      initContainers:
+        # Download snapshot for faster sync
+        - name: snapshot-download
+          image: alpine:3.19
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ ! -f /data/ledger/initialized ]; then
+                echo "Downloading Solana snapshot..."
+                apk add --no-cache wget
+                # Uncomment and configure for actual deployment
+                # wget -O /data/snapshot.tar.bz2 https://api.mainnet-beta.solana.com/snapshot.tar.bz2
+                # tar -xjf /data/snapshot.tar.bz2 -C /data/ledger
+                touch /data/ledger/initialized
+              else
+                echo "Snapshot already exists, skipping download"
+              fi
+          volumeMounts:
+            - name: solana-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+
+      containers:
+        - name: solana-validator
+          image: solanalabs/solana:v1.18.15
+          imagePullPolicy: IfNotPresent
+          
+          command:
+            - solana-validator
+          args:
+            - --identity=/secrets/validator-keypair.json
+            - --ledger=/data/ledger
+            - --accounts=/data/accounts
+            - --snapshots=/data/snapshots
+            - --rpc-port=8899
+            - --dynamic-port-range=8000-8020
+            - --entrypoint=entrypoint.mainnet-beta.solana.com:8001
+            - --entrypoint=entrypoint2.mainnet-beta.solana.com:8001
+            - --entrypoint=entrypoint3.mainnet-beta.solana.com:8001
+            - --expected-genesis-hash=5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d
+            - --wal-recovery-mode=skip_any_corrupted_record
+            - --limit-ledger-size=50000000
+            - --no-voting
+            - --enable-rpc-transaction-history
+            - --enable-cpi-and-log-storage
+            - --rpc-bind-address=0.0.0.0
+            - --private-rpc
+            - --full-rpc-api
+            - --log=/data/logs/solana-validator.log
+            - --accounts-db-caching-enabled
+            - --no-poh-speed-test
+            - --no-os-network-limits-test
+          
+          ports:
+            - name: rpc
+              containerPort: 8899
+              protocol: TCP
+            - name: rpc-ws
+              containerPort: 8900
+              protocol: TCP
+            - name: gossip
+              containerPort: 8001
+              protocol: UDP
+            - name: tpu
+              containerPort: 8003
+              protocol: UDP
+            - name: tpu-fwd
+              containerPort: 8004
+              protocol: UDP
+            - name: retransmit
+              containerPort: 8005
+              protocol: UDP
+            - name: repair
+              containerPort: 8006
+              protocol: UDP
+            - name: serve-repair
+              containerPort: 8007
+              protocol: UDP
+            - name: broadcast
+              containerPort: 8008
+              protocol: UDP
+          
+          resources:
+            requests:
+              cpu: "12"
+              memory: 256Gi
+              ephemeral-storage: 100Gi
+            limits:
+              cpu: "16"
+              memory: 512Gi
+              ephemeral-storage: 200Gi
+          
+          volumeMounts:
+            - name: solana-data
+              mountPath: /data
+            - name: solana-secrets
+              mountPath: /secrets
+              readOnly: true
+            - name: solana-config
+              mountPath: /config
+              readOnly: true
+          
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8899
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  SLOT=$(solana slot --url http://localhost:8899 2>/dev/null)
+                  NETWORK_SLOT=$(solana slot --url https://api.mainnet-beta.solana.com 2>/dev/null)
+                  DIFF=$((NETWORK_SLOT - SLOT))
+                  if [ "$DIFF" -lt 100 ]; then
+                    exit 0
+                  else
+                    exit 1
+                  fi
+            initialDelaySeconds: 600
+            periodSeconds: 60
+            timeoutSeconds: 30
+            failureThreshold: 3
+          
+          env:
+            - name: RUST_LOG
+              value: "solana=info"
+            - name: SOLANA_METRICS_CONFIG
+              valueFrom:
+                configMapKeyRef:
+                  name: solana-config
+                  key: metrics_config
+      
+      volumes:
+        - name: solana-secrets
+          secret:
+            secretName: solana-validator-keypair
+            defaultMode: 0400
+        - name: solana-config
+          configMap:
+            name: solana-config
+      
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-type
+                    operator: In
+                    values:
+                      - blockchain
+                  - key: storage-type
+                    operator: In
+                    values:
+                      - nvme
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: solana-rpc
+                topologyKey: kubernetes.io/hostname
+      
+      tolerations:
+        - key: "blockchain"
+          operator: "Equal"
+          value: "solana"
+          effect: "NoSchedule"
+
+  volumeClaimTemplates:
+    - metadata:
+        name: solana-data
+        labels:
+          app: solana-rpc
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: nvme-fast  # High-performance NVMe storage class
+        resources:
+          requests:
+            storage: 2Ti

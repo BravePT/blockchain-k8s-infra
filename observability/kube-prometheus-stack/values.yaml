@@ -1,0 +1,136 @@
+# kube-prometheus-stack Helm values
+# https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack
+#
+# Install:
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm install prometheus prometheus-community/kube-prometheus-stack -n observability -f values.yaml
+
+fullnameOverride: prometheus
+
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    etcd: false  # Disable if not monitoring etcd
+    kubernetesApps: true
+    kubernetesResources: true
+    kubernetesStorage: true
+    kubernetesSystem: true
+    node: true
+    prometheus: true
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    replicas: 1
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+grafana:
+  enabled: true
+  adminUser: admin
+  adminPassword: changeme  # Change this or use existing secret
+  
+  persistence:
+    enabled: true
+    size: 10Gi
+  
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - grafana.example.com  # Change to your domain
+    tls:
+      - secretName: grafana-tls
+        hosts:
+          - grafana.example.com
+
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          url: http://prometheus-kube-prometheus-prometheus:9090
+          isDefault: true
+        - name: Loki
+          type: loki
+          url: http://loki-stack:3100
+          
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: 'default'
+          orgId: 1
+          folder: ''
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+
+prometheus:
+  enabled: true
+  prometheusSpec:
+    replicas: 1
+    retention: 15d
+    retentionSize: "45GB"
+    
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+    
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+              
+    # Scrape configs for additional targets
+    additionalScrapeConfigs:
+      - job_name: 'solana-rpc'
+        static_configs:
+          - targets: ['solana-rpc.blockchain.svc.cluster.local:8899']
+        metrics_path: /metrics
+        scrape_interval: 30s
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true
+
+# ServiceMonitor for Solana RPC
+additionalPrometheusRulesMap:
+  solana-alerts:
+    groups:
+      - name: solana
+        rules:
+          - alert: SolanaRPCDown
+            expr: up{job="solana-rpc"} == 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Solana RPC is down"
+              description: "Solana RPC node has been down for more than 5 minutes"
+          - alert: SolanaSlotsBehind
+            expr: solana_validator_slots_behind > 100
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Solana node falling behind"
+              description: "Solana node is more than 100 slots behind"

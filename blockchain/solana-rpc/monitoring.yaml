@@ -1,0 +1,87 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: solana-rpc-pdb
+  namespace: blockchain
+  labels:
+    app: solana-rpc
+spec:
+  minAvailable: 0  # Allow disruption for single replica
+  selector:
+    matchLabels:
+      app: solana-rpc
+---
+# ServiceMonitor for Prometheus Operator
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: solana-rpc
+  namespace: blockchain
+  labels:
+    app: solana-rpc
+    release: prometheus  # Match kube-prometheus-stack release
+spec:
+  selector:
+    matchLabels:
+      app: solana-rpc
+  namespaceSelector:
+    matchNames:
+      - blockchain
+  endpoints:
+    - port: rpc
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+# PrometheusRule for Solana alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: solana-rpc-alerts
+  namespace: blockchain
+  labels:
+    app: solana-rpc
+    release: prometheus
+spec:
+  groups:
+    - name: solana-rpc
+      rules:
+        - alert: SolanaRPCDown
+          expr: up{job="solana-rpc"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            chain: solana
+          annotations:
+            summary: "Solana RPC node is down"
+            description: "Solana RPC node {{ $labels.pod }} has been down for more than 5 minutes"
+        
+        - alert: SolanaHighSlotLag
+          expr: solana_validator_slot_behind > 100
+          for: 10m
+          labels:
+            severity: warning
+            chain: solana
+          annotations:
+            summary: "Solana node falling behind"
+            description: "Solana node {{ $labels.pod }} is {{ $value }} slots behind"
+        
+        - alert: SolanaHighMemoryUsage
+          expr: container_memory_usage_bytes{container="solana-validator"} / container_spec_memory_limit_bytes{container="solana-validator"} > 0.9
+          for: 15m
+          labels:
+            severity: warning
+            chain: solana
+          annotations:
+            summary: "Solana node high memory usage"
+            description: "Solana node {{ $labels.pod }} memory usage is above 90%"
+        
+        - alert: SolanaStorageAlmostFull
+          expr: kubelet_volume_stats_available_bytes{persistentvolumeclaim=~"solana-data.*"} / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~"solana-data.*"} < 0.1
+          for: 30m
+          labels:
+            severity: critical
+            chain: solana
+          annotations:
+            summary: "Solana storage almost full"
+            description: "Solana node {{ $labels.pod }} has less than 10% storage available"

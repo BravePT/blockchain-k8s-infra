@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: solana-config
+  namespace: blockchain
+  labels:
+    app: solana-rpc
+data:
+  metrics_config: |
+    host=https://metrics.solana.com:8086,db=mainnet-beta,u=mainnet-beta_write,p=password
+  
+  # Validator configuration
+  validator.toml: |
+    # Solana Validator Configuration
+    
+    [rpc]
+    # Enable full RPC API
+    enable_rpc_transaction_history = true
+    enable_cpi_and_log_storage = true
+    
+    # RPC rate limiting
+    rpc_threads = 16
+    rpc_bigtable_timeout = 30
+    
+    [accounts_db]
+    # Accounts database configuration
+    accounts_db_caching_enabled = true
+    accounts_index_bins = 8192
+    
+    [ledger]
+    # Ledger configuration
+    limit_ledger_size = 50000000
+    
+    [snapshots]
+    # Snapshot configuration
+    snapshot_interval_slots = 500
+    maximum_full_snapshots_to_retain = 2
+    maximum_incremental_snapshots_to_retain = 4
+  
+  # Health check script
+  health-check.sh: |
+    #!/bin/bash
+    set -e
+    
+    RPC_URL="http://localhost:8899"
+    
+    # Check if RPC is responding
+    HEALTH=$(curl -s -X POST -H "Content-Type: application/json" \
+      -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' \
+      $RPC_URL | jq -r '.result')
+    
+    if [ "$HEALTH" != "ok" ]; then
+      echo "Health check failed: $HEALTH"
+      exit 1
+    fi
+    
+    # Check slot lag
+    LOCAL_SLOT=$(curl -s -X POST -H "Content-Type: application/json" \
+      -d '{"jsonrpc":"2.0","id":1,"method":"getSlot"}' \
+      $RPC_URL | jq -r '.result')
+    
+    NETWORK_SLOT=$(curl -s -X POST -H "Content-Type: application/json" \
+      -d '{"jsonrpc":"2.0","id":1,"method":"getSlot"}' \
+      https://api.mainnet-beta.solana.com | jq -r '.result')
+    
+    SLOT_LAG=$((NETWORK_SLOT - LOCAL_SLOT))
+    
+    if [ "$SLOT_LAG" -gt 100 ]; then
+      echo "Slot lag too high: $SLOT_LAG"
+      exit 1
+    fi
+    
+    echo "Health: OK, Slot lag: $SLOT_LAG"
+    exit 0

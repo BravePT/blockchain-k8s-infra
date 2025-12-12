@@ -1,0 +1,63 @@
+# Secrets and sensitive files
+secret.yaml
+!secret.yaml.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+kubeconfig
+*-kubeconfig.yaml
+
+# Keypairs and credentials
+validator-keypair.json
+*.keypair
+*.keypair.json
+id_rsa*
+id_ed25519*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Terraform state (if you add it later)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Helm
+charts/*.tgz
+requirements.lock
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+*.log
+
+# Local configuration overrides
+*.local
+!settings.local.json
+values-local.yaml
+config-local.yaml

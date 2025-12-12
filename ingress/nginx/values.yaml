@@ -1,0 +1,58 @@
+# NGINX Ingress Controller Helm values
+# https://github.com/kubernetes/ingress-nginx/tree/main/charts/ingress-nginx
+#
+# Install:
+#   helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+#   helm install ingress-nginx ingress-nginx/ingress-nginx -n ingress -f values.yaml
+
+controller:
+  replicaCount: 2
+  
+  ingressClassResource:
+    name: nginx
+    enabled: true
+    default: true
+    controllerValue: "k8s.io/ingress-nginx"
+  
+  # Optimization for high throughput RPC
+  config:
+    use-gzip: "true"
+    gzip-types: "application/json"
+    proxy-body-size: "50m"         # Allow large RPC payloads
+    proxy-read-timeout: "180"      # Longer timeout for heavy queries
+    proxy-send-timeout: "180"
+    client-header-buffer-size: "64k"
+    large-client-header-buffers: "4 64k"
+    enable-real-ip: "true"
+  
+  # Expose metrics for Prometheus
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      namespace: "observability"
+      additionalLabels:
+        release: "prometheus"
+  
+  service:
+    enabled: true
+    type: LoadBalancer
+    annotations: {}
+      # service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    externalTrafficPolicy: Local
+  
+  # Expose Solana TCP ports directly if needed (Stream)
+  # requires --tcp-services-configmap=$(POD_NAMESPACE)/tcp-services
+  # tcp:
+  #   8899: "blockchain/solana-rpc:8899"
+  #   8900: "blockchain/solana-rpc:8900"
+  
+  resources:
+    requests:
+      cpu: 100m
+      memory: 90Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+  allowSnippetAnnotations: true
